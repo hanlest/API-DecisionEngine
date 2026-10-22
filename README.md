@@ -390,8 +390,10 @@ python examples/server.py               # http://127.0.0.1:8000
 ```
 
 On Windows, `start.bat` does the same from a clone: it creates `.venv` with whichever supported
-Python is installed, installs CPU torch and the `serve` extra on first run, then starts the server
-and opens the browser. `start.bat 8080` picks a different port.
+Python is installed, installs a matching PyTorch build (CUDA when `nvidia-smi` is available, otherwise
+CPU-only) and the `serve` extra on first run, then starts the server and opens the browser.
+The Windows launchers default to port **8002** (8000 is often in use). Pass another port as the first
+argument (`start.bat 8080`). Use `start-gpu.bat` or `start-cpu.bat` to force CUDA or CPU.
 
 Open `http://127.0.0.1:8000` in a browser for the playground, or hit it directly:
 

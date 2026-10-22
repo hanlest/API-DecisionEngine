@@ -406,6 +406,16 @@ class BatchRequest(BaseModel):
         return data
 
 
+class ModelLoadRequest(BaseModel):
+    model: Optional[str] = Field(
+        default=None,
+        description="Checkpoint to load into memory (" + _model_names() + "). "
+                    "Omit to preload every registered checkpoint.",
+    )
+
+    _v_model = field_validator("model")(classmethod(lambda cls, v: _check_model(v)))
+
+
 # --------------------------------------------------------------------------- #
 # App
 # --------------------------------------------------------------------------- #
@@ -482,6 +492,32 @@ def _predict(state: Any, questions: Dict[str, Any], **kw: Any) -> Dict[str, Any]
 def _questions(model_map: Dict[str, Question]) -> Dict[str, Any]:
     """Back to the plain dicts laya expects, dropping unset keys."""
     return {k: v.model_dump(exclude_none=True) for k, v in model_map.items()}
+
+
+def _load_checkpoints(model: Optional[str]) -> Dict[str, Any]:
+    """Download and build checkpoint(s) without running inference."""
+    from laya.mcp.device import agent_device, router_agent
+
+    router = _router()
+    started = time.perf_counter()
+    if model is None:
+        router.preload()
+    else:
+        router.load(model)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+    loaded = list(router.loaded)
+    checkpoint_devices: Dict[str, str] = {}
+    for name in loaded:
+        device = agent_device(router_agent(router, name))
+        if device:
+            checkpoint_devices[name] = device
+    return {
+        "status": "ok",
+        "loaded": loaded,
+        "checkpoint_devices": checkpoint_devices,
+        "elapsed_ms": elapsed_ms,
+        "requested": model,
+    }
 
 
 @app.get("/health")
@@ -621,6 +657,20 @@ def predict(req: PredictRequest) -> Dict[str, Any]:
         # (paths, libraries, memory) rather than the request.
         _log.exception("prediction failed")
         raise HTTPException(status_code=500, detail="prediction failed")
+
+
+@app.post("/model/load")
+async def model_load(req: ModelLoadRequest) -> Dict[str, Any]:
+    """Build checkpoint weights in memory (GPU/CPU) so the first /predict avoids a cold load."""
+    try:
+        return await run_in_threadpool(_load_checkpoints, req.model)
+    except HTTPException:
+        raise
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        _log.exception("model load failed")
+        raise HTTPException(status_code=500, detail="model load failed")
 
 
 @app.post("/predict/batch")
@@ -3620,6 +3670,7 @@ def _models_page(payload: Dict[str, Any]) -> HTMLResponse:
 _ENDPOINTS = (
     ("GET", "/", "The playground", "/"),
     ("POST", "/predict", "Answer every question about one state", ""),
+    ("POST", "/model/load", "Load checkpoint(s) into memory without inference", ""),
     ("POST", "/predict/batch", "The same questions over up to 64 states", ""),
     ("POST", "/gui", "Form or JSON in, rendered answers out; no JavaScript needed", ""),
     ("GET", "/models", "Checkpoints and when the router picks each", "/models"),
@@ -3807,7 +3858,8 @@ async def gui_predict(request: Request) -> HTMLResponse:
 async def _not_found(request, exc):
     return JSONResponse(
         status_code=404,
-        content={"detail": "not found", "routes": ["/", "/predict", "/predict/batch", "/gui", "/models", "/qtypes", "/health", "/docs"]},
+        content={"detail": "not found", "routes": ["/", "/predict", "/model/load", "/predict/batch",
+                                                   "/gui", "/models", "/qtypes", "/health", "/docs"]},
     )
 
 

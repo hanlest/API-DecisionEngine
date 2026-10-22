@@ -106,6 +106,7 @@ SCRIPT_SUITES = [
     "tests/test_revision_pinning.py",
     "tests/test_example_server_errors.py",
     "tests/test_example_server_per_call_controls.py",
+    "tests/test_example_server_load.py",
     "tests/test_crewai.py",
     "tests/test_llamaindex.py",
     "tests/test_langchain_real_mode.py",
